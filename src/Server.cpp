@@ -5,8 +5,6 @@ Server::Server()
       maxBufferSize_(DEFAULT_SOCKET_RECV_BUFFER_SIZE),
       isRunning_(false)
 {
-    threadPool_.resize(DEFAULT_THREADPOOL_SIZE);
-    clientSockets_.resize(DEFAULT_THREADPOOL_SIZE);
 }
 
 void Server::Run(std::string port)
@@ -53,6 +51,15 @@ void Server::Run(std::string port)
 
     freeaddrinfo(addr_);
 
+    struct sockaddr_in local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_port = htons(8888);
+    local_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    // 소켓을 로컬 IP에 바인딩
+    bind(listenSocket, (struct sockaddr*)&local_addr, sizeof(local_addr));
+
     resultValue = listen(listenSocket, SOMAXCONN);
     if (resultValue == SOCKET_ERROR)
     {
@@ -60,8 +67,10 @@ void Server::Run(std::string port)
         CleanUp(listenSocket);
         Stop();
     }
-
-    Accept();
+    while (true)
+    {
+        Accept();
+    }
 }
 
 void Server::Stop()
@@ -86,7 +95,7 @@ void Server::Accept()
             return;
         }
 
-        threadPool_.emplace_back(ClientHandler, this, newSocket);
+        threadPool_.emplace_back(&Server::ClientHandler, this, newSocket);
         threadPool_.back().detach();
         clientSockets_.push_back(newSocket);
     }
@@ -97,21 +106,32 @@ void Server::ClientHandler(SOCKET clientSocket)
     char* buffer = new char[maxBufferSize_];
     size_t recvBytes;
 
-    do
+    send(clientSocket, chat.c_str(), chat.size(), 0);
+
+    while (true)
     {
         memset(buffer, 0, maxBufferSize_);
         recvBytes = recv(clientSocket, buffer, maxBufferSize_, 0);
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& sock : clientSockets_)
+        if (std::string(buffer) == "/quit") break;
+
+        if (recvBytes > 0)
         {
-            if (sock != clientSocket)
+            chat += buffer;
+            chat += "\n";
+
+            std::cout << chat;
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& sock : clientSockets_)
             {
-                send(sock, buffer, recvBytes, 0);
+                if (sock != clientSocket)
+                {
+                    send(sock, buffer, recvBytes, 0);
+                }
             }
         }
-
-    } while (recvBytes > 0);
+    };
 
     closesocket(clientSocket);
     {
@@ -120,6 +140,8 @@ void Server::ClientHandler(SOCKET clientSocket)
                                          clientSockets_.end(), clientSocket),
                              clientSockets_.end());
     }
+
+    delete[] buffer;
 }
 
 int main()

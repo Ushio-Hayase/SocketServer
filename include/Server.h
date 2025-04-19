@@ -17,8 +17,6 @@ class Server
    public:
     Server();
 
-    virtual ~Server();
-
     void Run(std::string);
     void Stop();
 
@@ -39,4 +37,6 @@ class Server
     addrinfo* addr_ = nullptr;
     SOCKET listenSocket;
     WSADATA wsaData_;
+
+    std::string chat;
 };
